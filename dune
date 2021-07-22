@@ -1,0 +1,5 @@
+(executable
+ (name ogrep)
+ ;;(libraries eio_main domainslib re)
+ (libraries re base stdio unix core)
+)
