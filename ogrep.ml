@@ -11,21 +11,6 @@ let f () =
   let cwd = Eio.Stdenv.cwd env in
   try_write_file cwd "test_file" "hello world"
 *)
-(* Whats the stragegy? *)
-(* We have at least one buffer.
-   Read into the buffer, and find the next newline
-   Then copy the line into an ocaml string.
-
-   Once a line has been found, we schedule a task to grep.
-   Repeat for each line until the end is reached.
-
-   At this point we know the start and end of the line.
-   There might be more data available.
-
-   We could also just use standard blocking calls to read the data.
-   We should test how fast we can read.
- *)
-
 
 open Base
 open Stdio
@@ -45,12 +30,12 @@ let parse_gitignore (path_globs, file_globs) dir =
     | "" -> (path_globs, file_globs)
     | p when Char.(p.[0] = '#') -> (path_globs, file_globs)
     | p when Char.(p.[0] = '!') ->
-      eprintf "Argh - Ignore pattern: %s/.gitignore \n%!" dir;
       (path_globs, file_globs)
     | p when String.contains p '/' ->
       (* Standard glob pattern *)
+      let pattern = String.strip p ~drop:(function '/' -> true | _ -> false) in
       let re =
-        dir ^ "/" ^ p
+        dir ^ "/" ^ pattern
         |> Re.Glob.glob ~anchored:true
         |> Re.compile
       in
@@ -124,41 +109,9 @@ let find_all_files dir =
   Sequence.unfold ~init:[dir] ~f:inner
 
 let _ =
-  let files = find_all_files ("..", ([], [])) in
+  let files = find_all_files ((Sys.get_argv ()).(1), ([], [])) in
   let file_count = Sequence.fold ~init:0 ~f:(fun acc _ -> 1 + acc) files in
   (* read_lines "ogrep.ml"; *)
   printf "Files: %d\n" file_count;
   printf "Lines: %d\n" !lines;
   ()
-
-
-(* We read a file fully, and ask to find all patterns *)
-(* Can we write a regex with supports that? *)
-(* We schedule to domains for doing cpu intensive work. *)
-(* Reading the dir is blocking. Do we care? As long as we are faster than the domains *)
-(* So we need to have fibers reading files. 2 per domain, so we always have the next ready under the assumption that its slow to scan files. (Its not - but still) *)
-
-
-(** Hmm. Can I mix domainslib and eio?
-    I want to do work-stealing. So I want a global queue of tasks.
-    A task is process a dir or scan a file.
-    Each task is fullfilled with the result.
-
-    Or should I run everything under eio?
-    Eio creates a new domain for each call to domain thingy.
-
-    A task is:
-| Directory of string
-| File of string
-| Data of (string * string)
-| Result of (string * string list)
-
-
-A fiber resolves a task....
-So its a promise?
-We ex
-
-
-
-    Maybe we should send lines to the domains as fibers.
-*)
