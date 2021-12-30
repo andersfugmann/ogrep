@@ -1,0 +1,3 @@
+[submodule "ocaml-re"]
+	path = ocaml-re
+	url = git@github.com:andersfugmann/ocaml-re.git
