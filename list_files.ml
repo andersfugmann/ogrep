@@ -57,7 +57,7 @@ let ls_files dir =
 
 let id v = v
 
-let rec process_files_in_dir ~cwd ~dir ~filter ~f dir_listing =
+let rec process_files_in_dir ~recurse_git_dir ~cwd ~dir ~filter ~f dir_listing =
   let filter = match dir_listing.has_gitignore with
     | true ->
       let gitignore = Gitignore.parse ~cwd dir ".gitignore" in
@@ -76,17 +76,20 @@ let rec process_files_in_dir ~cwd ~dir ~filter ~f dir_listing =
         let dir_listing = ls_files path in
         match dir_listing.has_git_dir with
         | true ->
-          let cwd = Gitignore.remove_trailing_slash path in
-          process_files_in_dir ~cwd ~dir:"/" ~filter:id ~f dir_listing
+          let dir = Gitignore.remove_trailing_slash path in
+          recurse_git_dir ~dir dir_listing
         | false ->
-          process_files_in_dir ~cwd ~dir ~filter ~f dir_listing
+          process_files_in_dir ~recurse_git_dir ~cwd ~dir ~filter ~f dir_listing
       end
     | (file, size) ->
       f ~dir:(cwd ^ dir) ~file ~size
   ) files
 
 
-let list_files ~f dir =
+let list_files ~recurse_git_dir ~f ?dir_listing dir =
   let filter f = f in
-  let dir_listing = ls_files dir in
-  process_files_in_dir ~cwd:dir ~dir:"/" ~filter ~f dir_listing
+  let dir_listing = match dir_listing with
+    | None -> ls_files dir
+    | Some dir_listing -> dir_listing
+  in
+  process_files_in_dir ~recurse_git_dir ~cwd:dir ~dir:"/" ~filter ~f dir_listing

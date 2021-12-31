@@ -18,5 +18,7 @@ let log fmt =
 let _ =
   let dir = Gitignore.remove_trailing_slash (Sys.get_argv ()).(1) in
   let f ~dir ~file ~size = Stdlib.Printf.printf "%8d %s%s\n" size dir file in
-  (* First list all files *)
-  List_files.list_files ~f dir
+  let rec recurse_git_dir ~dir dir_listing =
+    List_files.list_files ~recurse_git_dir ~f ~dir_listing dir
+  in
+  List_files.list_files ~recurse_git_dir ~f dir
