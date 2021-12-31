@@ -60,13 +60,33 @@ let parse ~cwd path file =
   Stdio.In_channel.read_lines (cwd ^ path ^ "/" ^ file)
   |> List.filter_map ~f:(parse_line ~prefix:path)
 
-let create_filter filters files =
-  let filter file =
-    List.fold_left ~init:true ~f:(fun acc (tpe, re) ->
+let append filters filter =
+  [filter] @ filters
+
+let _is_excluded filters file =
+  let is_excluded filter file =
+    List.fold_left ~init:false ~f:(fun acc (tpe, re) ->
       match tpe, Re.execp re file with
-      | Include, true -> true
-      | Exclude, true -> false
-      | _, false -> acc
-    ) filters
+      | Exclude, true -> true
+      | Include, true -> false
+      | _ -> acc
+    ) filter
   in
-  List.filter ~f:(fun (file, _size) -> filter file) files
+  List.exists ~f:(fun filter -> is_excluded filter file) filters
+
+let is_excluded filters file =
+  let is_excluded filter file =
+    List.fold_left ~init:false ~f:(fun acc (tpe, re) ->
+      match tpe, acc with
+      | Exclude, false -> Re.execp re file
+      | Include, true -> not (Re.execp re file)
+      | _ -> acc
+    ) filter
+  in
+  List.exists ~f:(fun filter -> is_excluded filter file) filters
+
+
+let empty = []
+
+let filter_files filters ~f files =
+  List.filter ~f:(fun file -> not (is_excluded filters (f file))) files

@@ -57,39 +57,36 @@ let ls_files dir =
 
 let id v = v
 
-let rec process_files_in_dir ~recurse_git_dir ~cwd ~dir ~filter ~f dir_listing =
-  let filter = match dir_listing.has_gitignore with
+let rec process_files_in_dir ~recurse_git_dir ~cwd ~dir ~filters ~f dir_listing =
+  let filters = match dir_listing.has_gitignore with
     | true ->
-      let gitignore = Gitignore.parse ~cwd dir ".gitignore" in
-      (* This should be optimized. We should examine each file individually, as the lists might be rather long *)
-      let filter files = filter files |> Gitignore.create_filter gitignore in
-      filter
-    | false -> filter
+      let filter = Gitignore.parse ~cwd dir ".gitignore" in
+      Gitignore.append filters filter
+    | false -> filters
   in
-  (* Filter all the files *)
-  let files = filter dir_listing.files in
   (* Process all files *)
-  List.iter ~f:(function
-    | (file, -1) -> begin
-        let dir = dir ^ file in
-        let path = cwd ^ dir in
+  List.iter ~f:(fun (file, size) ->
+    let file = dir ^ file in
+    match Gitignore.is_excluded filters file, size with
+    | true, _ -> ()
+    | false, -1 -> begin
+        let path = cwd ^ file in
         let dir_listing = ls_files path in
         match dir_listing.has_git_dir with
         | true ->
           let dir = Gitignore.remove_trailing_slash path in
           recurse_git_dir ~dir dir_listing
         | false ->
-          process_files_in_dir ~recurse_git_dir ~cwd ~dir ~filter ~f dir_listing
+          process_files_in_dir ~recurse_git_dir ~cwd ~dir:file ~filters ~f dir_listing
       end
-    | (file, size) ->
-      f ~dir:(cwd ^ dir) ~file ~size
-  ) files
+    | false, size ->
+      f ~file:(cwd ^ file) ~size
+  ) dir_listing.files
 
 
 let list_files ~recurse_git_dir ~f ?dir_listing dir =
-  let filter f = f in
   let dir_listing = match dir_listing with
     | None -> ls_files dir
     | Some dir_listing -> dir_listing
   in
-  process_files_in_dir ~recurse_git_dir ~cwd:dir ~dir:"/" ~filter ~f dir_listing
+  process_files_in_dir ~recurse_git_dir ~cwd:dir ~dir:"/" ~filters:Gitignore.empty ~f dir_listing
