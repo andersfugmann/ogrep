@@ -4,19 +4,17 @@ open Stdio
 type pattern_type = Include | Exclude
 
 let debug = false
+let module_name =
+  match String.substr_index_all ~may_overlap:true Stdlib.__MODULE__ ~pattern:"__" |> List.last with
+  | Some index ->
+    let pos = index + 2 in
+    let len = String.length Stdlib.__MODULE__ - pos in
+    String.sub ~pos ~len Stdlib.__MODULE__
+  | None -> Stdlib.__MODULE__
 let log fmt =
-  let module_name =
-    match String.substr_index_all ~may_overlap:true Stdlib.__MODULE__ ~pattern:"__" |> List.last with
-    | Some index ->
-      let pos = index + 2 in
-      let len = String.length Stdlib.__MODULE__ - pos in
-      String.sub ~pos ~len Stdlib.__MODULE__
-    | None -> Stdlib.__MODULE__
-  in
   match debug with
   | false -> Printf.ifprintf Out_channel.stderr fmt
   | true -> Stdlib.Printf.printf Stdlib.("%s: " ^^ fmt ^^ "\n") module_name
-
 
 let has_traling_slash path = Char.(path.[String.length path - 1] = '/')
 let remove_trailing_slash path =
@@ -49,42 +47,51 @@ let parse_line ~prefix line =
       | false -> line ^ "{,/}"
       | true -> line
     in
-    let re = Re.Glob.glob ~expand_braces:true ~anchored:true line |> Re.compile in
-    (* Notice that we can merge sequences of pattern *)
+    (*let re = Re.Glob.glob ~expand_braces:true ~anchored:true line |> Re.compile in *)
     log "Pattern in %s: %s" prefix line;
-    Some (pattern_type, re)
+    Some (pattern_type, line)
 
 (* Need some extra data like dir *)
 let parse ~cwd path file =
   log "Parse %s%s/%s" cwd path file;
-  Stdio.In_channel.read_lines (cwd ^ path ^ "/" ^ file)
-  |> List.filter_map ~f:(parse_line ~prefix:path)
-
-let append filters filter =
-  [filter] @ filters
-
-let _is_excluded filters file =
-  let is_excluded filter file =
-    List.fold_left ~init:false ~f:(fun acc (tpe, re) ->
-      match tpe, Re.execp re file with
-      | Exclude, true -> true
-      | Include, true -> false
-      | _ -> acc
-    ) filter
+  let rec inner (tpe, curr) = function
+    | [] when List.is_empty curr -> []
+    | [] -> [(tpe, curr)]
+    | line :: lines ->
+      match parse_line ~prefix:path line with
+      | None -> inner (tpe, curr) lines
+      | Some (tpe', re) when Poly.(tpe' = tpe) ->
+        inner (tpe, re :: curr) lines
+      | Some (tpe', re) when List.is_empty curr ->
+        inner (tpe', [re]) lines
+      | Some (tpe', re) ->
+        (tpe', curr) :: inner (tpe', [re]) lines
   in
-  List.exists ~f:(fun filter -> is_excluded filter file) filters
+  Stdio.In_channel.read_lines (cwd ^ path ^ "/" ^ file)
+  |> inner (Exclude, [])
+  |> List.map ~f:(fun (tpe, res) ->
+    let re =
+      String.concat ~sep:"," res |> Printf.sprintf "{%s}"
+      |> Re.Glob.glob ~anchored:true ~expand_braces:true
+      |> Re.compile
+    in
+    (tpe, re)
+  )
+
+let append filters = function
+  | [] -> filters
+  | filter -> [filter] @ filters
 
 let is_excluded filters file =
   let is_excluded filter file =
     List.fold_left ~init:false ~f:(fun acc (tpe, re) ->
       match tpe, acc with
       | Exclude, false -> Re.execp re file
-      | Include, true -> not (Re.execp re file)
+      | Include, true -> Re.execp re file |> not
       | _ -> acc
     ) filter
   in
   List.exists ~f:(fun filter -> is_excluded filter file) filters
-
 
 let empty = []
 

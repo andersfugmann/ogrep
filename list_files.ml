@@ -4,7 +4,7 @@ open Stdio
 type directory_listing = {
   has_git_dir: bool;
   has_gitignore: bool;
-  files: (string * int) list;
+  files: string list;
 }
 
 let debug = false
@@ -19,43 +19,45 @@ let log fmt =
   in
   match debug with
   | false -> Printf.ifprintf Out_channel.stderr fmt
-  | true -> Stdlib.Printf.printf Stdlib.("%s: " ^^ fmt ^^ "\n") module_name
+  | true -> Stdlib.Printf.printf Stdlib.("%s: " ^^ fmt ^^ "\n%!") module_name
 
 let ls_files dir =
-  log "ls_files '%s'" dir;
-  let dir_handle =
-    match Unix.opendir dir with
-    | handle -> handle
-    | exception e ->
-      log "Cannot open '%s' in '%s'" dir (Unix.getcwd ());
-      raise e
-  in
-  let rec inner ~has_gitignore ~has_git_dir files =
-    match Unix.readdir dir_handle with
-    | file -> begin
-        match file, Unix.lstat (dir ^ "/" ^ file) with
-        | ".", _ | "..", _ -> inner ~has_gitignore ~has_git_dir files
-        | ".git", Unix.{ st_kind = S_DIR; _ } ->
-          inner ~has_gitignore ~has_git_dir:true files
-        | ".gitignore", Unix.{ st_kind = S_REG; st_size; _ } ->
-          inner ~has_gitignore:true ~has_git_dir ((file, st_size) :: files)
-        | _, Unix.{ st_kind = S_REG; st_size; _ } ->
-          inner ~has_gitignore ~has_git_dir ((file, st_size) :: files)
-        | _, Unix.{ st_kind = S_DIR; _ } ->
-          inner ~has_gitignore ~has_git_dir ((file ^ "/", -1) :: files)
-        | _, _ -> inner ~has_gitignore ~has_git_dir files
-        | exception _ ->
-          log "Permission denied on %s/%s" dir file;
-          inner ~has_gitignore ~has_git_dir files
-      end
+  let dir = match dir with "" -> "/" | dir -> dir in
+  let rec inner dir_handle ~has_gitignore ~has_git_dir files =
+    match Dirent_unix.readdir dir_handle with
+    | Dirent.Dirent.{ name = "."; _}
+    | Dirent.Dirent.{ name = ".."; _} ->
+      inner dir_handle ~has_gitignore ~has_git_dir files
+    | Dirent.Dirent.{ kind = Dirent.File_kind.DT_DIR; name = ".git"; _ } ->
+      inner dir_handle ~has_gitignore ~has_git_dir:true files
+    | Dirent.Dirent.{ kind = Dirent.File_kind.DT_DIR; name; _ } ->
+      inner dir_handle ~has_gitignore ~has_git_dir ((name ^ "/") :: files)
+    | Dirent.Dirent.{ kind = Dirent.File_kind.DT_REG; name = ".gitignore"; _ } ->
+      inner dir_handle ~has_gitignore:true ~has_git_dir (".gitignore" :: files)
+    | Dirent.Dirent.{ kind = Dirent.File_kind.DT_REG; name; _ } ->
+      inner dir_handle ~has_gitignore ~has_git_dir (name :: files)
+    | _ -> inner dir_handle ~has_gitignore ~has_git_dir files
     | exception End_of_file ->
-      Unix.closedir dir_handle;
       (has_gitignore, has_git_dir, files)
+    | exception _ ->
+      log "Permission denied on %s" dir;
+      inner dir_handle ~has_gitignore ~has_git_dir files
   in
-  let (has_gitignore, has_git_dir, files) = inner ~has_git_dir:false ~has_gitignore:false [] in
-  { has_gitignore; has_git_dir; files }
+  log "ls_files '%s'" dir;
+  match Dirent_unix.opendir dir with
+  | dir_handle ->
+    let (has_gitignore, has_git_dir, files) =
+      inner dir_handle ~has_git_dir:false ~has_gitignore:false []
+    in
+    Dirent_unix.closedir dir_handle;
+    { has_gitignore; has_git_dir; files }
+  | exception _ ->
+    { has_gitignore = false; has_git_dir = false; files = [] }
 
 let id v = v
+
+let endswith s c =
+  Char.(s.[String.length s - 1] = c)
 
 let rec process_files_in_dir ~recurse_git_dir ~cwd ~dir ~filters ~f dir_listing =
   let filters = match dir_listing.has_gitignore with
@@ -65,11 +67,13 @@ let rec process_files_in_dir ~recurse_git_dir ~cwd ~dir ~filters ~f dir_listing 
     | false -> filters
   in
   (* Process all files *)
-  List.iter ~f:(fun (file, size) ->
+  List.iter ~f:(function
+      f when Char.(f.[0] = '.') -> ()
+    | file ->
     let file = dir ^ file in
-    match Gitignore.is_excluded filters file, size with
-    | true, _ -> ()
-    | false, -1 -> begin
+    match Gitignore.is_excluded filters file with
+    | true -> ()
+    | false when endswith file '/' -> begin
         let path = cwd ^ file in
         let dir_listing = ls_files path in
         match dir_listing.has_git_dir with
@@ -79,8 +83,8 @@ let rec process_files_in_dir ~recurse_git_dir ~cwd ~dir ~filters ~f dir_listing 
         | false ->
           process_files_in_dir ~recurse_git_dir ~cwd ~dir:file ~filters ~f dir_listing
       end
-    | false, size ->
-      f ~file:(cwd ^ file) ~size
+    | false ->
+      f ~file:(cwd ^ file)
   ) dir_listing.files
 
 

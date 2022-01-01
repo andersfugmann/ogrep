@@ -1,6 +1,6 @@
 (executables
  (names ogrep read_file)
- (libraries re base stdio unix eio_main)
+ (libraries re base stdio unix eio_main unix-dirent.unix)
 )
 
 (vendored_dirs ocaml-re)
