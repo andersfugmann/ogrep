@@ -25,8 +25,8 @@ let ls_files dir =
   let dir = match dir with "" -> "/" | dir -> dir in
   let rec inner dir_handle ~has_gitignore ~has_git_dir files =
     match Dirent_unix.readdir dir_handle with
-    | Dirent.Dirent.{ name = "."; _}
-    | Dirent.Dirent.{ name = ".."; _} ->
+    | Dirent.Dirent.{ name = "."; kind = Dirent.File_kind.DT_DIR; _ }
+    | Dirent.Dirent.{ name = ".."; kind = Dirent.File_kind.DT_DIR; _ } ->
       inner dir_handle ~has_gitignore ~has_git_dir files
     | Dirent.Dirent.{ kind = Dirent.File_kind.DT_DIR; name = ".git"; _ } ->
       inner dir_handle ~has_gitignore ~has_git_dir:true files
@@ -53,8 +53,6 @@ let ls_files dir =
     { has_gitignore; has_git_dir; files }
   | exception _ ->
     { has_gitignore = false; has_git_dir = false; files = [] }
-
-let id v = v
 
 let endswith s c =
   Char.(s.[String.length s - 1] = c)
