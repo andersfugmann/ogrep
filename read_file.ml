@@ -15,6 +15,11 @@ let log fmt =
   | false -> Stdlib.Format.ifprintf formatter fmt
   | true -> Eio.Std.traceln Stdlib.("%s: " ^^ fmt) module_name
 
+type t = {
+  chunk: Uring.Region.chunk;
+  buffer: Bytes.t;
+}
+
 let find_newline ~offset ~len bigstring =
   Bigstringaf.memchr bigstring offset '\n' len
 
@@ -46,28 +51,35 @@ let rec process_lines ~f ~read bigstring ~src_off buffer ~dst_off =
     in
     process_lines ~read ~f bigstring ~src_off:(index+1) buffer ~dst_off:0
 
-let count = ref 0
-
-
-let iter_lines ~f file fd =
-  let chunk = Eio_linux.alloc () in
-  let length = Uring.Region.length chunk in
-  let buffer = Bytes.create (max (length * 2) (4096 * 2)) in
-  let read () =
-    let data_read = Eio_linux.read_upto fd chunk length in
-    Uring.Region.to_bigstring ~len:data_read chunk
-  in
-  let () = match read () with
-    | chunk when Bigstringaf.memchr chunk 0 '\000' (min 1000 (Bigstringaf.length chunk)) = -1 ->
-      process_lines ~read ~f chunk ~src_off:0 buffer ~dst_off:0
-    | _ -> log "%s: Binary file" file
-    | exception _ -> log "%s: Empty file" file
-  in
-  Uring.Region.free chunk
-
-let iter_lines ~f file =
+let iter_lines t ~f file =
+  let length = Uring.Region.length t.chunk in
   Switch.run @@ fun sw ->
   let fd = Eio_linux.openat2 ~sw ~access:`R ~flags:Uring.Open_flags.(noatime + direct) ~perm:0
       ~resolve:Uring.Resolve.empty file
   in
-  iter_lines ~f:(f ~file) file fd
+  let read () =
+    let data_read = Eio_linux.read_upto fd t.chunk length in
+    log "Read: %d" data_read;
+    Uring.Region.to_bigstring ~len:data_read t.chunk
+  in
+  let () = match read () with
+    | chunk when Bigstringaf.memchr chunk 0 '\000' (min 1000 (Bigstringaf.length chunk)) = -1 ->
+      process_lines ~read ~f chunk ~src_off:0 t.buffer ~dst_off:0
+    | _ -> log "%s: Binary file" file
+    | exception _ -> log "%s: Empty file" file
+  in
+  Eio_linux.FD.close fd
+
+let init () =
+  let chunk = Eio_linux.alloc () in
+  let length = Uring.Region.length chunk in
+  let buffer = Bytes.create (max (length * 2) (4096 * 2)) in
+  { chunk; buffer }
+
+let deinit { chunk; _ } =
+  Eio_linux.free chunk
+
+let read ~dir file =
+  Eio.Dir.with_open_in dir file @@ fun source ->
+  Eio.Dir.with_open_out ~create:`Never dir "/dev/null" @@ fun sink ->
+  Eio.Flow.copy source sink

@@ -3,7 +3,7 @@ build:
 	dune build
 
 run: build
-	time _build/default/ogrep.exe '.*' .
+	time _build/default/ogrep.exe 'fugmann' ..
 
 clean:
 	dune clean

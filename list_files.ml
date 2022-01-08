@@ -66,7 +66,6 @@ let rec process_files_in_dir ~recurse_git_dir ~cwd ~dir ~filters ~f dir_listing 
   in
   (* Process all files *)
   List.iter ~f:(function
-      f when Char.(f.[0] = '.') -> ()
     | file ->
     let file = dir ^ file in
     match Gitignore.is_excluded filters file with
